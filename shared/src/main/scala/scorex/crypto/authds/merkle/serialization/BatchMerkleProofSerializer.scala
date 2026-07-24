@@ -7,6 +7,9 @@ import scorex.crypto.hash.{CryptographicHash, Digest, Digest32}
 
 import scala.util.Try
 
+/**
+  * Serializer for compact Merkle multiproofs.
+  */
 class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](implicit val hf: HF)  {
 
   private val digestSize = hf.DigestSize
@@ -15,6 +18,9 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
   private val indicesSize = digestSize + indexSize
   private val proofsSize = digestSize + sideSize
 
+  /**
+    * Serializes a multiproof to bytes: 4-byte numIndices, 4-byte numProofs, indices, proofs.
+    */
   def serialize(bmp: BatchMerkleProof[D]): Array[Byte] =
     Bytes.concat(
       Ints.toByteArray(bmp.indices.size),
@@ -23,24 +29,29 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
       proofsToBytes(bmp.proofs)
     )
 
+  /**
+    * Deserializes a multiproof from bytes.
+    * Validates the header length, non-negative counts, and that the declared payload fits in the input.
+    */
   def deserialize(bytes: Array[Byte]): Try[BatchMerkleProof[D]] = Try {
 
-    require (bytes.length >= 8, "Deserialization error, empty input.")
+    require(bytes.length >= 8, "Deserialization error, empty input.")
 
     val numIndices = Ints.fromByteArray(bytes.slice(0, 4))
     val numProofs = Ints.fromByteArray(bytes.slice(4, 8))
 
-    require(numIndices >= 0)
-    require(numProofs  >= 0)
+    require(numIndices >= 0, "Deserialization error, invalid input.")
+    require(numProofs >= 0, "Deserialization error, invalid input.")
 
     val expectedLength = numIndices.toLong * indicesSize + numProofs.toLong * proofsSize
-    require(expectedLength <= bytes.length - 8)
+    require(expectedLength <= bytes.length - 8, "Deserialization error, invalid input.")
 
     val (indices, proofs) = bytes.drop(8).splitAt(numIndices * indicesSize)
 
-    if (indices.length != numIndices * indicesSize || proofs.length != numProofs * proofsSize) {
-      throw new Error("Deserialization error, invalid input.")
-    }
+    require(
+      indices.length == numIndices * indicesSize && proofs.length == numProofs * proofsSize,
+      "Deserialization error, invalid input."
+    )
 
     BatchMerkleProof(
       indicesFromBytes(indices),

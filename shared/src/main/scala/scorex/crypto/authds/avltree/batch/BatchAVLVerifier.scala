@@ -274,6 +274,9 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
     }
   }
 
+  /**
+    * Collects all reconstructed verifier nodes matching the predicate.
+    */
   def extractNodes(extractor: VerifierNodes[D] => Boolean): Option[Seq[VerifierNodes[D]]] = {
     def treeTraverser(rNode: VerifierNodes[D], collected: Seq[VerifierNodes[D]]): Seq[VerifierNodes[D]] = rNode match {
       case l: VerifierLeaf[D] => if (extractor(l)) l +: collected else collected
@@ -287,6 +290,9 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
     topNode.map(t => treeTraverser(t, Seq()))
   }
 
+  /**
+    * Returns the first reconstructed verifier node matching the predicate, if any.
+    */
   def extractFirstNode(extractor: VerifierNodes[D] => Boolean): Option[VerifierNodes[D]] = {
     def treeTraverser(rNode: VerifierNodes[D]): Option[VerifierNodes[D]] = rNode match {
       case l: VerifierLeaf[D] => Some(l).filter(extractor)

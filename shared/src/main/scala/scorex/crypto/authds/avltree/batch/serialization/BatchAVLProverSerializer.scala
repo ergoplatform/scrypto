@@ -8,6 +8,11 @@ import scorex.utils.{Bytes, Ints, ByteArray, Logger}
 
 import scala.util.Try
 
+/**
+  * Serializes and deserializes a [[BatchAVLProver]] tree into a manifest and subtrees.
+  * The binary format is self-describing and includes length prefixes for variable-size subtrees.
+  * Deserialization rejects malformed or inconsistent input by returning `Failure`.
+  */
 class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     (implicit val hf: HF, val logger: Logger) { serializer =>
 
@@ -16,8 +21,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
   type SlicedTree = (BatchAVLProverManifest[D], Seq[BatchAVLProverSubtree[D]])
 
   /**
-    * Slice AVL tree to top subtree tree (BatchAVLProverManifest) and
-    * bottom subtrees (BatchAVLProverSubtree) with height `subtreeDepth`
+    * Slices an AVL tree into a top manifest and bottom subtrees at the given `subtreeDepth`.
     */
   def slice(tree: BatchAVLProver[D, HF], subtreeDepth: Int): SlicedTree = tree.topNode match {
     case tn: InternalProverNode[D] =>
@@ -52,7 +56,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
   }
 
   /**
-    * Combine tree pieces into one big tree
+    * Combines a manifest and its subtrees back into a single prover tree.
     */
   def combine(sliced: SlicedTree,
               keyLength: Int,
@@ -83,6 +87,9 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     }
   }
 
+  /**
+    * Serializes a manifest to bytes: root height followed by the serialized root node.
+    */
   def manifestToBytes(manifest: BatchAVLProverManifest[D]): Array[Byte] = {
     Bytes.concat(
       Ints.toByteArray(manifest.rootHeight),
@@ -90,6 +97,10 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     )
   }
 
+  /**
+    * Deserializes a manifest from bytes.
+    * Validates the root height and encoded node structure.
+    */
   def manifestFromBytes(bytes: Array[Byte],
                         keyLength: Int): Try[BatchAVLProverManifest[D]] = Try {
     val oldHeight = Ints.fromByteArray(bytes.slice(0, 4))
@@ -98,13 +109,23 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     BatchAVLProverManifest[D](oldTop, oldHeight)
   }
 
+  /**
+    * Serializes a subtree to bytes.
+    */
   def subtreeToBytes(t: BatchAVLProverSubtree[D]): Array[Byte] = nodesToBytes(t.subtreeTop)
 
+  /**
+    * Deserializes a subtree from bytes.
+    * Validates the encoded node structure.
+    */
   def subtreeFromBytes(b: Array[Byte], kl: Int): Try[BatchAVLProverSubtree[D]] = {
     nodesFromBytes(b, kl).
       map(topNode => BatchAVLProverSubtree[D](topNode))
   }
 
+  /**
+    * Serializes a tree node and its descendants to bytes.
+    */
   def nodesToBytes(rootNode: ProverNodes[D]): Array[Byte] = {
     def loop(currentNode: ProverNodes[D]): Array[Byte] = currentNode match {
       case l: ProverLeaf[D] =>
@@ -120,6 +141,10 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     loop(rootNode)
   }
 
+  /**
+    * Deserializes a tree node and its descendants from bytes.
+    * Validates the encoded structure and subtree lengths.
+    */
   def nodesFromBytes(bytesIn: Array[Byte], keyLength: Int): Try[ProverNodes[D]] = Try {
     require(keyLength >= 0)
     def loop(bytes: Array[Byte]): ProverNodes[D] = bytes.head match {

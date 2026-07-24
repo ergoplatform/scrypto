@@ -54,13 +54,13 @@ class BatchMerkleProofSerializerSpecification extends AnyPropSpec
   property(testName = "empty deserialization input") {
     val serializer = new BatchMerkleProofSerializer[D, HF]
     val res = serializer.deserialize(scorex.utils.Random.randomBytes(2))
-    res.failure.exception should have message "Deserialization error, empty input."
+    res.failure.exception should have message "requirement failed: Deserialization error, empty input."
   }
 
   property(testName = "invalid deserialization input") {
     val serializer = new BatchMerkleProofSerializer[D, HF]
     val res = serializer.deserialize(scorex.utils.Random.randomBytes(9))
-    res.failure.exception should have message "Deserialization error, invalid input."
+    res.failure.exception should have message "requirement failed: Deserialization error, invalid input."
   }
 
   property("indices serialization + deserialization") {
