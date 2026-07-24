@@ -11,11 +11,7 @@ Use the repository as code examples for the trees also, though one code example 
 
 ## Get Scrypto
 
-Scrypto is available on Sonatype for Scala 2.11, 2.12, 2.13, and 3, with Scala.js support for Scala 2.13 and 3:
-
-```scala
-resolvers += "Sonatype Releases" at "https://oss.sonatype.org/content/repositories/releases/"
-```
+Scrypto is available on Maven Central for Scala 2.11, 2.12, 2.13, and 3, with Scala.js support for Scala 2.13 and 3:
 
 For the JVM:
 

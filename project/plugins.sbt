@@ -7,7 +7,7 @@ addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.10")
 
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.3.7")
 
-addSbtPlugin("org.xerial.sbt" % "sbt-sonatype" % "3.8")
+addSbtPlugin("org.xerial.sbt" % "sbt-sonatype" % "3.12.2")
 
 addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "0.9.2")
 
