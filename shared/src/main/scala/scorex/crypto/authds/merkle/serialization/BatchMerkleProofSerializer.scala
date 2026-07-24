@@ -25,12 +25,17 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
 
   def deserialize(bytes: Array[Byte]): Try[BatchMerkleProof[D]] = Try {
 
-    if (bytes.length < 8) {
-      throw new Error("Deserialization error, empty input.")
-    }
+    require (bytes.length >= 8, "Deserialization error, empty input.")
 
     val numIndices = Ints.fromByteArray(bytes.slice(0, 4))
     val numProofs = Ints.fromByteArray(bytes.slice(4, 8))
+
+    require(numIndices >= 0)
+    require(numProofs  >= 0)
+
+    val expectedLength = numIndices.toLong * indicesSize + numProofs.toLong * proofsSize
+    require(expectedLength <= bytes.length - 8)
+
     val (indices, proofs) = bytes.drop(8).splitAt(numIndices * indicesSize)
 
     if (indices.length != numIndices * indicesSize || proofs.length != numProofs * proofsSize) {

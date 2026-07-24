@@ -203,6 +203,7 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
             i += 4
             vl
           }
+          require(valueLength >= 0 && valueLength <= 4194304 && valueLength <= proof.length - i, "wrong length value")
           val value = ADValue @@ proof.slice(i, i + valueLength)
           i += valueLength
           val leaf = new VerifierLeaf[D](key, value, nextLeafKey)

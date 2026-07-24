@@ -82,7 +82,7 @@ lazy val scrypto = crossProject(JVMPlatform, JSPlatform)
     .settings(commonSettings)
     .jvmSettings(
       libraryDependencies ++= Seq(
-        "org.bouncycastle" % "bcprov-jdk15to18" % "1.80"
+        "org.bouncycastle" % "bcprov-jdk15to18" % "1.85.1"
       ),
       scalaVersion := scala213,
       crossScalaVersions := Seq(scala211, scala212, scala213, scala3)
@@ -102,7 +102,7 @@ lazy val scryptoJS = scrypto.js
       // how to setup ScalablyTyped https://scalablytyped.org/docs/library-developer
       stOutputPackage := "scorex",
       Compile / npmDependencies ++= Seq(
-        "@noble/hashes" -> "1.6.0"
+        "@noble/hashes" -> "1.6.1"
       ),
       useYarn := false
     )

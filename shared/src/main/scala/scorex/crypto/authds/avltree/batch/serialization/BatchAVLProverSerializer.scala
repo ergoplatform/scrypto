@@ -93,14 +93,17 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
   def manifestFromBytes(bytes: Array[Byte],
                         keyLength: Int): Try[BatchAVLProverManifest[D]] = Try {
     val oldHeight = Ints.fromByteArray(bytes.slice(0, 4))
+    require(oldHeight >= 0 && oldHeight <= 256)
     val oldTop = nodesFromBytes(bytes.slice(4, bytes.length), keyLength).get
     BatchAVLProverManifest[D](oldTop, oldHeight)
   }
 
   def subtreeToBytes(t: BatchAVLProverSubtree[D]): Array[Byte] = nodesToBytes(t.subtreeTop)
 
-  def subtreeFromBytes(b: Array[Byte], kl: Int): Try[BatchAVLProverSubtree[D]] = nodesFromBytes(b, kl).
-    map(topNode => BatchAVLProverSubtree[D](topNode))
+  def subtreeFromBytes(b: Array[Byte], kl: Int): Try[BatchAVLProverSubtree[D]] = {
+    nodesFromBytes(b, kl).
+      map(topNode => BatchAVLProverSubtree[D](topNode))
+  }
 
   def nodesToBytes(rootNode: ProverNodes[D]): Array[Byte] = {
     def loop(currentNode: ProverNodes[D]): Array[Byte] = currentNode match {
@@ -118,6 +121,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
   }
 
   def nodesFromBytes(bytesIn: Array[Byte], keyLength: Int): Try[ProverNodes[D]] = Try {
+    require(keyLength >= 0)
     def loop(bytes: Array[Byte]): ProverNodes[D] = bytes.head match {
       case 0 =>
         val key = ADKey @@ bytes.slice(1, keyLength + 1)
@@ -128,6 +132,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
         val balance = Balance @@ bytes.slice(1, 2).head
         val key = ADKey @@ bytes.slice(2, keyLength + 2)
         val leftLength = Ints.fromByteArray(bytes.slice(keyLength + 2, keyLength + 6))
+        require(leftLength > 0 && keyLength.toLong + 6 + leftLength.toLong <= bytes.length)
         val leftBytes = bytes.slice(keyLength + 6, keyLength + 6 + leftLength)
         val rightBytes = bytes.slice(keyLength + 6 + leftLength, bytes.length)
         val left = loop(leftBytes)
