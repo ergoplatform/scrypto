@@ -222,8 +222,8 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     serializer.nodesFromBytes(bytes, KL, maxDepth).isSuccess shouldBe true
   }
 
-  property("nodesFromBytes default maxDepth rejects trees deeper than 256") {
-    val depth = 260
+  property("nodesFromBytes default maxDepth rejects trees deeper than 255") {
+    val depth = 256
     val bytes = rightSkewedChainBytes(depth, KL)
     serializer.nodesFromBytes(bytes, KL).isFailure shouldBe true
   }
@@ -236,8 +236,20 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     serializer.manifestFromBytes(manifestBytes, KL).isFailure shouldBe true
   }
 
-  property("subtreeFromBytes rejects trees deeper than 256") {
-    val depth = 260
+  property("manifestFromBytes rejects height 256") {
+    val nodeBytes = rightSkewedChainBytes(1, KL)
+    val manifestBytes = Ints.toByteArray(256) ++ nodeBytes
+    serializer.manifestFromBytes(manifestBytes, KL).isFailure shouldBe true
+  }
+
+  property("manifestFromBytes accepts height 255") {
+    val nodeBytes = rightSkewedChainBytes(1, KL)
+    val manifestBytes = Ints.toByteArray(255) ++ nodeBytes
+    serializer.manifestFromBytes(manifestBytes, KL).isSuccess shouldBe true
+  }
+
+  property("subtreeFromBytes rejects trees deeper than 255") {
+    val depth = 256
     val bytes = rightSkewedChainBytes(depth, KL)
     serializer.subtreeFromBytes(bytes, KL).isFailure shouldBe true
   }
@@ -248,6 +260,33 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     val root = deepInternalChain(depth)
     val manifest = BatchAVLProverManifest[D](root, rootHeight)
     serializer.combine((manifest, Seq.empty), KL, None).isFailure shouldBe true
+  }
+
+  property("combine rejects manifest with wrong height") {
+    val actualDepth = 3
+    val rootHeight = 5
+    val root = deepInternalChain(actualDepth)
+    val manifest = BatchAVLProverManifest[D](root, rootHeight)
+    serializer.combine((manifest, Seq.empty), KL, None).isFailure shouldBe true
+  }
+
+  property("combine accepts manifest with matching height") {
+    val depth = 3
+    val root = deepInternalChain(depth)
+    val manifest = BatchAVLProverManifest[D](root, depth)
+    serializer.combine((manifest, Seq.empty), KL, None).isSuccess shouldBe true
+  }
+
+  property("nodesFromBytes rejects truncated leaf") {
+    serializer.nodesFromBytes(Array(0.toByte), KL).isFailure shouldBe true
+    serializer.nodesFromBytes(Array(0.toByte) ++ Array.fill(KL - 1)(0.toByte), KL).isFailure shouldBe true
+    serializer.nodesFromBytes(Array(0.toByte) ++ Array.fill(KL)(0.toByte), KL).isFailure shouldBe true
+    serializer.nodesFromBytes(Array(0.toByte) ++ Array.fill(2 * KL)(0.toByte), KL).isSuccess shouldBe true
+  }
+
+  property("nodesFromBytes rejects non-positive keyLength") {
+    serializer.nodesFromBytes(Array(0.toByte), 0).isFailure shouldBe true
+    serializer.nodesFromBytes(Array(0.toByte), -1).isFailure shouldBe true
   }
 
   def leftTree(n: ProverNodes[D]): Seq[ProverNodes[D]] = n match {

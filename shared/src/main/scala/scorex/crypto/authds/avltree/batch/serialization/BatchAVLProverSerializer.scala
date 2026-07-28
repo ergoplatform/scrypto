@@ -85,6 +85,32 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
       case _: ProverLeaf[D] =>
     }
 
+    // Compute the actual height of the combined tree and verify it matches the manifest height.
+    // This prevents a manifest from claiming an arbitrary height that the BatchAVLProver constructor
+    // would otherwise accept verbatim.
+    def treeHeight(node: ProverNodes[D]): Int = {
+      var stack = List((node, 0))
+      var maxHeight = 0
+      while (stack.nonEmpty) {
+        val (n, depth) = stack.head
+        stack = stack.tail
+        n match {
+          case _: ProverLeaf[D] =>
+            maxHeight = math.max(maxHeight, depth)
+          case pn: ProxyInternalNode[D] if pn.isEmpty =>
+            throw new IllegalStateException("unfilled proxy node in combined tree")
+          case in: InternalProverNode[D] =>
+            stack = (in.left, depth + 1) :: (in.right, depth + 1) :: stack
+          case _ =>
+            throw new IllegalStateException("unexpected node type")
+        }
+      }
+      maxHeight
+    }
+    val actualHeight = treeHeight(manifest.root)
+    require(actualHeight == manifest.rootHeight,
+      s"manifest height ${manifest.rootHeight} does not match actual tree height $actualHeight")
+
     new BatchAVLProver[D, HF](keyLength, valueLengthOpt, Some(manifest.root -> manifest.rootHeight)) {
       override val logger = serializer.logger
     }
@@ -107,7 +133,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
   def manifestFromBytes(bytes: Array[Byte],
                         keyLength: Int): Try[BatchAVLProverManifest[D]] = Try {
     val oldHeight = Ints.fromByteArray(bytes.slice(0, 4))
-    require(oldHeight >= 0 && oldHeight <= 256)
+    require(oldHeight >= 0 && oldHeight < 256, "manifest height must be in range 0..255")
     val oldTop = nodesFromBytes(bytes.slice(4, bytes.length), keyLength, oldHeight).get
     BatchAVLProverManifest[D](oldTop, oldHeight)
   }
@@ -122,7 +148,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     * Validates the encoded node structure.
     */
   def subtreeFromBytes(b: Array[Byte], kl: Int): Try[BatchAVLProverSubtree[D]] = {
-    nodesFromBytes(b, kl, maxDepth = 256).
+    nodesFromBytes(b, kl, maxDepth = 255).
       map(topNode => BatchAVLProverSubtree[D](topNode))
   }
 
@@ -148,13 +174,14 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     * Deserializes a tree node and its descendants from bytes.
     * Validates the encoded structure and subtree lengths.
     */
-  def nodesFromBytes(bytesIn: Array[Byte], keyLength: Int, maxDepth: Int = 256): Try[ProverNodes[D]] = Try {
-    require(keyLength >= 0)
+  def nodesFromBytes(bytesIn: Array[Byte], keyLength: Int, maxDepth: Int = 255): Try[ProverNodes[D]] = Try {
+    require(keyLength > 0)
     require(maxDepth >= 0, "maxDepth must be non-negative")
     def loop(bytes: Array[Byte], depth: Int): ProverNodes[D] = {
       require(depth >= 0, "serialized tree depth exceeds maximum allowed depth")
       bytes.head match {
         case 0 =>
+          require(1L + 2L * keyLength <= bytes.length, "truncated leaf bytes")
           val key = ADKey @@ bytes.slice(1, keyLength + 1)
           val nextLeafKey = ADKey @@ bytes.slice(keyLength + 1, 2 * keyLength + 1)
           val value = ADValue @@ bytes.slice(2 * keyLength + 1, bytes.length)
