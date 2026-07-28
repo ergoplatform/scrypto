@@ -66,19 +66,22 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
       case tn: InternalProverNode[D] =>
 
         // manifest being mutated here
-        def mutateLoop(n: ProverNodes[D]): Unit = n match {
-          case n: ProxyInternalNode[D] if n.isEmpty =>
-            val left = sliced._2.find(_.id sameElements n.leftLabel).get.subtreeTop
-            val right = sliced._2.find(_.id sameElements n.rightLabel).get.subtreeTop
-            n.setChild(left)
-            n.setChild(right)
-          case n: InternalProverNode[D] =>
-            mutateLoop(n.left)
-            mutateLoop(n.right)
-          case _ =>
+        def mutateLoop(n: ProverNodes[D], depth: Int): Unit = {
+          require(depth >= 0, "tree depth exceeds maximum allowed depth")
+          n match {
+            case n: ProxyInternalNode[D] if n.isEmpty =>
+              val left = sliced._2.find(_.id sameElements n.leftLabel).get.subtreeTop
+              val right = sliced._2.find(_.id sameElements n.rightLabel).get.subtreeTop
+              n.setChild(left)
+              n.setChild(right)
+            case n: InternalProverNode[D] =>
+              mutateLoop(n.left, depth - 1)
+              mutateLoop(n.right, depth - 1)
+            case _ =>
+          }
         }
 
-        mutateLoop(tn)
+        mutateLoop(tn, manifest.rootHeight)
       case _: ProverLeaf[D] =>
     }
 
@@ -105,7 +108,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
                         keyLength: Int): Try[BatchAVLProverManifest[D]] = Try {
     val oldHeight = Ints.fromByteArray(bytes.slice(0, 4))
     require(oldHeight >= 0 && oldHeight <= 256)
-    val oldTop = nodesFromBytes(bytes.slice(4, bytes.length), keyLength).get
+    val oldTop = nodesFromBytes(bytes.slice(4, bytes.length), keyLength, oldHeight).get
     BatchAVLProverManifest[D](oldTop, oldHeight)
   }
 
@@ -119,7 +122,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     * Validates the encoded node structure.
     */
   def subtreeFromBytes(b: Array[Byte], kl: Int): Try[BatchAVLProverSubtree[D]] = {
-    nodesFromBytes(b, kl).
+    nodesFromBytes(b, kl, maxDepth = 256).
       map(topNode => BatchAVLProverSubtree[D](topNode))
   }
 
@@ -145,40 +148,44 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     * Deserializes a tree node and its descendants from bytes.
     * Validates the encoded structure and subtree lengths.
     */
-  def nodesFromBytes(bytesIn: Array[Byte], keyLength: Int): Try[ProverNodes[D]] = Try {
+  def nodesFromBytes(bytesIn: Array[Byte], keyLength: Int, maxDepth: Int = 256): Try[ProverNodes[D]] = Try {
     require(keyLength >= 0)
-    def loop(bytes: Array[Byte]): ProverNodes[D] = bytes.head match {
-      case 0 =>
-        val key = ADKey @@ bytes.slice(1, keyLength + 1)
-        val nextLeafKey = ADKey @@ bytes.slice(keyLength + 1, 2 * keyLength + 1)
-        val value = ADValue @@ bytes.slice(2 * keyLength + 1, bytes.length)
-        new ProverLeaf[D](key, value, nextLeafKey)
-      case 1 =>
-        val balance = Balance @@ bytes.slice(1, 2).head
-        val key = ADKey @@ bytes.slice(2, keyLength + 2)
-        val leftLength = Ints.fromByteArray(bytes.slice(keyLength + 2, keyLength + 6))
-        require(leftLength > 0 && keyLength.toLong + 6 + leftLength.toLong <= bytes.length)
-        val leftBytes = bytes.slice(keyLength + 6, keyLength + 6 + leftLength)
-        val rightBytes = bytes.slice(keyLength + 6 + leftLength, bytes.length)
-        val left = loop(leftBytes)
-        val right = loop(rightBytes)
+    require(maxDepth >= 0, "maxDepth must be non-negative")
+    def loop(bytes: Array[Byte], depth: Int): ProverNodes[D] = {
+      require(depth >= 0, "serialized tree depth exceeds maximum allowed depth")
+      bytes.head match {
+        case 0 =>
+          val key = ADKey @@ bytes.slice(1, keyLength + 1)
+          val nextLeafKey = ADKey @@ bytes.slice(keyLength + 1, 2 * keyLength + 1)
+          val value = ADValue @@ bytes.slice(2 * keyLength + 1, bytes.length)
+          new ProverLeaf[D](key, value, nextLeafKey)
+        case 1 =>
+          val balance = Balance @@ bytes.slice(1, 2).head
+          val key = ADKey @@ bytes.slice(2, keyLength + 2)
+          val leftLength = Ints.fromByteArray(bytes.slice(keyLength + 2, keyLength + 6))
+          require(leftLength > 0 && keyLength.toLong + 6 + leftLength.toLong <= bytes.length)
+          val leftBytes = bytes.slice(keyLength + 6, keyLength + 6 + leftLength)
+          val rightBytes = bytes.slice(keyLength + 6 + leftLength, bytes.length)
+          val left = loop(leftBytes, depth - 1)
+          val right = loop(rightBytes, depth - 1)
 
-        // check that left.key < key <= right.key
-        val leftComparison = ByteArray.compare(left.key, key)
-        val rightComparison = ByteArray.compare(key, right.key)
-        require(leftComparison < 0 && rightComparison <= 0, s"key check fail for key ${Base16.encode(key)}")
-        new InternalProverNode[D](key, left, right, balance)
-      case 2 =>
-        val balance = Balance @@ bytes.slice(1, 2).head
-        val key = ADKey @@ bytes.slice(2, keyLength + 2)
-        val leftLabel = hf.byteArrayToDigest(bytes.slice(keyLength + 2, keyLength + 2 + labelLength)).get
-        val rightLabel = hf.byteArrayToDigest(bytes.slice(keyLength + 2 + labelLength, keyLength + 2 + 2 * labelLength)).get
-        new ProxyInternalNode[D](key, leftLabel, rightLabel, balance)
-      case _ =>
-        ???
+          // check that left.key < key <= right.key
+          val leftComparison = ByteArray.compare(left.key, key)
+          val rightComparison = ByteArray.compare(key, right.key)
+          require(leftComparison < 0 && rightComparison <= 0, s"key check fail for key ${Base16.encode(key)}")
+          new InternalProverNode[D](key, left, right, balance)
+        case 2 =>
+          val balance = Balance @@ bytes.slice(1, 2).head
+          val key = ADKey @@ bytes.slice(2, keyLength + 2)
+          val leftLabel = hf.byteArrayToDigest(bytes.slice(keyLength + 2, keyLength + 2 + labelLength)).get
+          val rightLabel = hf.byteArrayToDigest(bytes.slice(keyLength + 2 + labelLength, keyLength + 2 + 2 * labelLength)).get
+          new ProxyInternalNode[D](key, leftLabel, rightLabel, balance)
+        case _ =>
+          ???
+      }
     }
 
-    loop(bytesIn)
+    loop(bytesIn, maxDepth)
   }
 }
 
