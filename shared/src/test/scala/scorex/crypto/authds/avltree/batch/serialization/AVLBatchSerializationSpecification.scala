@@ -27,10 +27,11 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
 
   def slice(tree: BatchAVLProver[D, HF]) = serializer.slice(tree, tree.rootNodeHeight / 2)
 
-  private def generateProver(size: Int = InitialTreeSize): BatchAVLProver[D, HF] = {
+  private def generateProver(size: Int = InitialTreeSize, keyOffset: Int = 0): BatchAVLProver[D, HF] = {
     val prover = new BatchAVLProver[D, HF](KL, None)
     val keyValues = (0 until size) map { i =>
-      (ADKey @@ Blake2b256(i.toString.getBytes("UTF-8")).take(KL), ADValue @@ i.toString.getBytes("UTF-8"))
+      val v = i + keyOffset
+      (ADKey @@ Blake2b256(v.toString.getBytes("UTF-8")).take(KL), ADValue @@ v.toString.getBytes("UTF-8"))
     }
     keyValues.foreach(kv => prover.performOneOperation(Insert(kv._1, kv._2)))
     prover.generateProof()
@@ -177,7 +178,8 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
 
     val subtree = sliced._2.head
     val subtreeBytes = serializer.subtreeToBytes(subtree)
-    val value = subtree.leafValues.head
+    // Skip sentinel leaves with empty values and pick a real leaf value to corrupt.
+    val value = subtree.leafValues.filter(_.nonEmpty).head
     val idx2 = subtreeBytes.indexOfSlice(value)
     subtreeBytes(idx2) = ((subtreeBytes(idx2) + 1) % Byte.MaxValue).toByte
     serializer.subtreeFromBytes(subtreeBytes, tree.keyLength)
@@ -259,7 +261,7 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     val rootHeight = 5
     val root = deepInternalChain(depth)
     val manifest = BatchAVLProverManifest[D](root, rootHeight)
-    serializer.combine((manifest, Seq.empty), KL, None).isFailure shouldBe true
+    serializer.combine((manifest, Array.empty), KL, None).isFailure shouldBe true
   }
 
   property("combine rejects manifest with wrong height") {
@@ -267,14 +269,14 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     val rootHeight = 5
     val root = deepInternalChain(actualDepth)
     val manifest = BatchAVLProverManifest[D](root, rootHeight)
-    serializer.combine((manifest, Seq.empty), KL, None).isFailure shouldBe true
+    serializer.combine((manifest, Array.empty), KL, None).isFailure shouldBe true
   }
 
   property("combine accepts manifest with matching height") {
     val depth = 3
     val root = deepInternalChain(depth)
     val manifest = BatchAVLProverManifest[D](root, depth)
-    serializer.combine((manifest, Seq.empty), KL, None).isSuccess shouldBe true
+    serializer.combine((manifest, Array.empty), KL, None).isSuccess shouldBe true
   }
 
   property("nodesFromBytes rejects truncated leaf") {
@@ -287,6 +289,82 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
   property("nodesFromBytes rejects non-positive keyLength") {
     serializer.nodesFromBytes(Array(0.toByte), 0).isFailure shouldBe true
     serializer.nodesFromBytes(Array(0.toByte), -1).isFailure shouldBe true
+  }
+
+  property("nodesFromBytes rejects internal node with leftLength consuming all remaining bytes") {
+    val leaf = Array(0.toByte) ++ keyBytes(0, KL) ++ keyBytes(1, KL) ++ Array(0.toByte)
+    val leftLength = leaf.length
+    val bytes = Array(1.toByte, 0.toByte) ++ keyBytes(2, KL) ++ Ints.toByteArray(leftLength) ++ leaf
+    serializer.nodesFromBytes(bytes, KL).isFailure shouldBe true
+  }
+
+  property("nodesFromBytes rejects invalid balance in internal node") {
+    val leaf = Array(0.toByte) ++ keyBytes(0, KL) ++ keyBytes(1, KL) ++ Array(0.toByte)
+    val bytes = Array(1.toByte, 2.toByte) ++ keyBytes(2, KL) ++ Ints.toByteArray(leaf.length) ++ leaf ++ leaf
+    serializer.nodesFromBytes(bytes, KL).isFailure shouldBe true
+
+    val bytesNegative = Array(1.toByte, -2.toByte) ++ keyBytes(2, KL) ++ Ints.toByteArray(leaf.length) ++ leaf ++ leaf
+    serializer.nodesFromBytes(bytesNegative, KL).isFailure shouldBe true
+  }
+
+  property("nodesFromBytes rejects invalid balance in proxy node") {
+    val leftLabel = Array.fill(hf.DigestSize)(0.toByte)
+    val rightLabel = Array.fill(hf.DigestSize)(1.toByte)
+    val bytes = Array(2.toByte, 2.toByte) ++ keyBytes(2, KL) ++ leftLabel ++ rightLabel
+    serializer.nodesFromBytes(bytes, KL).isFailure shouldBe true
+
+    val bytesNegative = Array(2.toByte, -2.toByte) ++ keyBytes(2, KL) ++ leftLabel ++ rightLabel
+    serializer.nodesFromBytes(bytesNegative, KL).isFailure shouldBe true
+  }
+
+  property("nodesFromBytes rejects trailing bytes in internal node") {
+    // Use a fixed-size proxy node as the right child so trailing bytes cannot be absorbed as leaf value.
+    val leftLeaf = Array(0.toByte) ++ keyBytes(0, KL) ++ keyBytes(1, KL) ++ Array(0.toByte)
+    val leftLabel = Array.fill(hf.DigestSize)(0.toByte)
+    val rightLabel = Array.fill(hf.DigestSize)(1.toByte)
+    val rightProxy = Array(2.toByte, 0.toByte) ++ keyBytes(1, KL) ++ leftLabel ++ rightLabel
+    val leftLength = leftLeaf.length
+    val internal = Array(1.toByte, 0.toByte) ++ keyBytes(1, KL) ++ Ints.toByteArray(leftLength) ++ leftLeaf ++ rightProxy
+    serializer.nodesFromBytes(internal ++ Array(3.toByte), KL).isFailure shouldBe true
+  }
+
+  property("nodesFromBytes rejects trailing bytes in proxy node") {
+    val leftLabel = Array.fill(hf.DigestSize)(0.toByte)
+    val rightLabel = Array.fill(hf.DigestSize)(1.toByte)
+    val proxy = Array(2.toByte, 0.toByte) ++ keyBytes(2, KL) ++ leftLabel ++ rightLabel
+    serializer.nodesFromBytes(proxy ++ Array(3.toByte), KL).isFailure shouldBe true
+  }
+
+  property("combine rejects duplicate subtree ids") {
+    val tree = generateProver()
+    val sliced = slice(tree)
+    val subtrees = sliced._2
+    whenever(subtrees.nonEmpty) {
+      val duplicate = subtrees.head
+      serializer.combine((sliced._1, subtrees :+ duplicate), tree.keyLength, tree.valueLengthOpt).isFailure shouldBe true
+    }
+  }
+
+  property("combine rejects missing subtrees") {
+    val tree = generateProver()
+    val sliced = slice(tree)
+    val subtrees = sliced._2
+    whenever(subtrees.size > 1) {
+      val missingOne = subtrees.tail
+      serializer.combine((sliced._1, missingOne), tree.keyLength, tree.valueLengthOpt).isFailure shouldBe true
+    }
+  }
+
+  property("combine rejects unused subtrees") {
+    val tree1 = generateProver(InitialTreeSize, keyOffset = 0)
+    val tree2 = generateProver(InitialTreeSize, keyOffset = 100000)
+    val sliced1 = slice(tree1)
+    val sliced2 = slice(tree2)
+    val referencedIds = sliced1._1.subtreesIds.map(_.toSeq).toSet
+    val extra = sliced2._2.head
+    whenever(sliced1._2.nonEmpty && sliced2._2.nonEmpty && !referencedIds.contains(extra.id.toSeq)) {
+      serializer.combine((sliced1._1, sliced1._2 :+ extra), tree1.keyLength, tree1.valueLengthOpt).isFailure shouldBe true
+    }
   }
 
   def leftTree(n: ProverNodes[D]): Seq[ProverNodes[D]] = n match {

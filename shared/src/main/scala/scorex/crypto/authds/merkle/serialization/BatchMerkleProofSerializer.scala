@@ -35,7 +35,7 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
     */
   def deserialize(bytes: Array[Byte]): Try[BatchMerkleProof[D]] = Try {
 
-    require(bytes.length >= 8, "Deserialization error, empty input.")
+    require(bytes.length >= 8, "Deserialization error, input too short.")
 
     val numIndices = Ints.fromByteArray(bytes.slice(0, 4))
     val numProofs = Ints.fromByteArray(bytes.slice(4, 8))
@@ -44,14 +44,9 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
     require(numProofs >= 0, "Deserialization error, invalid input.")
 
     val expectedLength = numIndices.toLong * indicesSize + numProofs.toLong * proofsSize
-    require(expectedLength <= bytes.length - 8, "Deserialization error, invalid input.")
+    require(expectedLength == bytes.length - 8, "Deserialization error, invalid input.")
 
     val (indices, proofs) = bytes.drop(8).splitAt(numIndices * indicesSize)
-
-    require(
-      indices.length == numIndices * indicesSize && proofs.length == numProofs * proofsSize,
-      "Deserialization error, invalid input."
-    )
 
     BatchMerkleProof(
       indicesFromBytes(indices),
@@ -78,6 +73,7 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
     bytes.grouped(indicesSize)
       .map(b => {
         val index = Ints.fromByteArray(b.slice(0, indexSize))
+        require(index >= 0, "Deserialization error, invalid negative index.")
         val hash = b.slice(indexSize, indicesSize).asInstanceOf[Digest]
         (index,hash)
       })
@@ -88,8 +84,10 @@ class BatchMerkleProofSerializer[D <: Digest32, HF <: CryptographicHash[D]](impl
     bytes.grouped(proofsSize)
       .map(b => {
         val hashBytes = b.slice(0, digestSize)
-        val hash = (if (hashBytes.forall(0.toByte.equals)) EmptyByteArray else hashBytes).asInstanceOf[Digest]
-        val side = b.apply(digestSize).asInstanceOf[Side]
+        val hash = (if (hashBytes.forall(_ == 0.toByte)) EmptyByteArray else hashBytes).asInstanceOf[Digest]
+        val sideByte = b.apply(digestSize)
+        require(sideByte == 0 || sideByte == 1, "Deserialization error, invalid side value.")
+        val side = Side @@ sideByte
         (hash, side)
       })
       .toSeq
