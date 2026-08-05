@@ -232,8 +232,10 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
             bytesIn(start + keyLength + 5)
           )
           require(leftLength > 0, "left subtree length must be positive")
-          val leftEnd = start + keyLength + 6 + leftLength
-          require(leftEnd < end, "left subtree length leaves no bytes for right subtree")
+          val leftEndLong = start.toLong + keyLength.toLong + 6L + leftLength.toLong
+          require(leftEndLong < end.toLong, "left subtree length leaves no bytes for right subtree")
+          require(leftEndLong <= Int.MaxValue, "left subtree length too large")
+          val leftEnd = leftEndLong.toInt
           val (left, leftConsumedEnd) = parse(start + keyLength + 6, leftEnd, depth - 1)
           require(leftConsumedEnd == leftEnd, s"left subtree did not consume exactly $leftLength bytes")
           val (right, rightEnd) = parse(leftEnd, end, depth - 1)

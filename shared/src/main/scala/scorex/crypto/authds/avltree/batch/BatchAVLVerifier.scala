@@ -39,6 +39,9 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
 
   protected val labelLength: Int = hf.DigestSize
 
+  /** Maximum allowed value length (4 MB) to limit parsing of variable-length leaf values. */
+  private val MaxValueLength = 4194304
+
   /**
     * Returns Some[the current digest of the authenticated data structure],
     * where the digest contains the root hash and the root height
@@ -152,7 +155,7 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
 
       // First compute log (number of operations), rounded up
       var logNumOps = 0
-      var temp = 1
+      var temp = 1L
       val realNumOperations: Int = maxNumOperations.getOrElse(0)
       while (temp < realNumOperations) {
         temp = temp * 2
@@ -161,7 +164,7 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
 
       // compute maximum height that the tree can be before an operation
       temp = 1 + math.max(rootNodeHeight, logNumOps)
-      val hnew = temp + temp / 2 // this will replace 1.4405 from the paper with 1.5 and will round down, which is safe, because hnew is an integer
+      val hnew = (temp + temp / 2).toInt // this will replace 1.4405 from the paper with 1.5 and will round down, which is safe, because hnew is an integer
       val realMaxDeletes: Int = maxDeletes.getOrElse(realNumOperations)
       // Note: this is quite likely a lot more than there will really be nodes
       (realNumOperations + realMaxDeletes) * (2 * rootNodeHeight + 1) + realMaxDeletes * hnew + 1 // +1 needed in case numOperations == 0
@@ -203,7 +206,7 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
             i += 4
             vl
           }
-          require(valueLength >= 0 && valueLength <= 4194304 && valueLength <= proof.length - i, "wrong length value")
+          require(valueLength >= 0 && valueLength <= MaxValueLength && valueLength <= proof.length - i, "wrong length value")
           val value = ADValue @@ proof.slice(i, i + valueLength)
           i += valueLength
           val leaf = new VerifierLeaf[D](key, value, nextLeafKey)
