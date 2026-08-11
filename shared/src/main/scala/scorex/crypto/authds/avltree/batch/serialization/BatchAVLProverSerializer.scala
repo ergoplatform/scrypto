@@ -32,7 +32,6 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
       val rootProxyNode = ProxyInternalNode(tn)
       val subtrees = ArrayBuffer.empty[BatchAVLProverSubtree[D]]
 
-      @tailrec
       def getSubtrees(currentNode: ProverNodes[D],
                       currentHeight: Int,
                       parent: ProxyInternalNode[D]): Unit = {
