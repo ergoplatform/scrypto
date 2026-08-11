@@ -157,6 +157,116 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     recovered.digest shouldEqual digest
   }
 
+  property("slice and combine tree with a branch bottoming out above subtreeDepth") {
+    // Shapes where a leaf is reached above the cut depth: the leaf is embedded directly
+    // in the manifest and must not also appear as an (unreferenced) subtree.
+    Seq(7, 58).foreach { treeSize =>
+      val tree = generateProver(treeSize)
+      val digest = tree.digest
+      val sliced = slice(tree)
+
+      // byte round-trip first, since combine mutates the manifest's proxy nodes
+      val manifestBytes = serializer.manifestToBytes(sliced._1)
+      val subtreeBytes = sliced._2.map(t => serializer.subtreeToBytes(t))
+      val recoveredFromBytes = serializer.combine(
+        (serializer.manifestFromBytes(manifestBytes, tree.keyLength).get,
+          subtreeBytes.map(b => serializer.subtreeFromBytes(b, tree.keyLength).get)),
+        tree.keyLength, tree.valueLengthOpt).get
+      recoveredFromBytes.digest shouldEqual digest
+
+      val recovered = serializer.combine(sliced, tree.keyLength, tree.valueLengthOpt).get
+      recovered.digest shouldEqual digest
+    }
+  }
+
+  property("slice and combine tiny trees (0 to 3 keys)") {
+    (0 to 3).foreach { treeSize =>
+      val tree = generateProver(treeSize)
+      val digest = tree.digest
+
+      val sliced = slice(tree)
+      val ids = sliced._1.subtreesIds
+      ids.size shouldBe sliced._2.size
+      ids.foreach(id => sliced._2.count(_.id.sameElements(id)) shouldBe 1)
+
+      // byte round-trip first, since combine mutates the manifest's proxy nodes
+      val manifestBytes = serializer.manifestToBytes(sliced._1)
+      val subtreeBytes = sliced._2.map(t => serializer.subtreeToBytes(t))
+      val recoveredManifest = serializer.manifestFromBytes(manifestBytes, tree.keyLength).get
+      val recoveredSubtrees = subtreeBytes.map(b => serializer.subtreeFromBytes(b, tree.keyLength).get)
+      recoveredSubtrees.map(t => serializer.subtreeToBytes(t)).flatten shouldBe subtreeBytes.flatten
+      val recoveredFromBytes = serializer.combine(
+        (recoveredManifest, recoveredSubtrees), tree.keyLength, tree.valueLengthOpt).get
+      recoveredFromBytes.digest shouldEqual digest
+
+      val recovered = serializer.combine(sliced, tree.keyLength, tree.valueLengthOpt).get
+      recovered.digest shouldEqual digest
+    }
+  }
+
+  property("manifest references exactly the sliced subtrees for small trees") {
+    (0 to 40).foreach { treeSize =>
+      val tree = generateProver(treeSize)
+      val sliced = slice(tree)
+      val ids = sliced._1.subtreesIds
+      ids.size shouldBe sliced._2.size
+      ids.foreach { id =>
+        sliced._2.count(_.id.sameElements(id)) shouldBe 1
+      }
+    }
+  }
+
+  property("slice and combine with various subtreeDepth values") {
+    val tree = generateProver(100)
+    val digest = tree.digest
+    val height = tree.rootNodeHeight
+    Seq(-1, 0, 1, height / 2, height - 1, height, height + 5).distinct.foreach { depth =>
+      val sliced = serializer.slice(tree, depth)
+      val manifestBytes = serializer.manifestToBytes(sliced._1)
+      val subtreeBytes = sliced._2.map(t => serializer.subtreeToBytes(t))
+      val recovered = serializer.combine(
+        (serializer.manifestFromBytes(manifestBytes, tree.keyLength).get,
+          subtreeBytes.map(b => serializer.subtreeFromBytes(b, tree.keyLength).get)),
+        tree.keyLength, tree.valueLengthOpt).get
+      recovered.digest shouldEqual digest
+    }
+  }
+
+  property("slice and combine tree with fixed value length") {
+    val prover = new BatchAVLProver[D, HF](KL, Some(VL))
+    (0 until 50).foreach { i =>
+      val key = ADKey @@ Blake2b256(i.toString.getBytes("UTF-8")).take(KL)
+      val value = ADValue @@ Blake2b256(("v" + i).getBytes("UTF-8")).take(VL)
+      prover.performOneOperation(Insert(key, value))
+    }
+    prover.generateProof()
+    val digest = prover.digest
+
+    val sliced = slice(prover)
+    val manifestBytes = serializer.manifestToBytes(sliced._1)
+    val subtreeBytes = sliced._2.map(t => serializer.subtreeToBytes(t))
+    val recovered = serializer.combine(
+      (serializer.manifestFromBytes(manifestBytes, prover.keyLength).get,
+        subtreeBytes.map(b => serializer.subtreeFromBytes(b, prover.keyLength).get)),
+      prover.keyLength, prover.valueLengthOpt).get
+    recovered.digest shouldEqual digest
+  }
+
+  property("slice and combine round-trip for random small sizes and depths") {
+    forAll(Gen.choose(0, 100), Gen.choose(-2, 12)) { (treeSize, depth) =>
+      val tree = generateProver(treeSize)
+      val digest = tree.digest
+      val sliced = serializer.slice(tree, depth)
+      val manifestBytes = serializer.manifestToBytes(sliced._1)
+      val subtreeBytes = sliced._2.map(t => serializer.subtreeToBytes(t))
+      val recovered = serializer.combine(
+        (serializer.manifestFromBytes(manifestBytes, tree.keyLength).get,
+          subtreeBytes.map(b => serializer.subtreeFromBytes(b, tree.keyLength).get)),
+        tree.keyLength, tree.valueLengthOpt).get
+      recovered.digest shouldEqual digest
+    }
+  }
+
   property("manifest serialization") {
     val serializer = new BatchAVLProverSerializer[D, HF]
     forAll(Gen.choose(0, 10000)) { (treeSize: Int) =>
