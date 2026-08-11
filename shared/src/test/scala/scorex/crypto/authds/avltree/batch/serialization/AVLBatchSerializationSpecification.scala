@@ -146,6 +146,17 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     }
   }
 
+  property("combine accepts subtrees passed as a non-Array Seq") {
+    val tree = generateProver()
+    val digest = tree.digest
+    val sliced = slice(tree)
+    // Downstream consumers may build the subtrees collection as a generic Seq (e.g. via .map),
+    // which must not fail with a ClassCastException at runtime.
+    val subtreesAsList = sliced._2.toList
+    val recovered = serializer.combine((sliced._1, subtreesAsList), tree.keyLength, tree.valueLengthOpt).get
+    recovered.digest shouldEqual digest
+  }
+
   property("manifest serialization") {
     val serializer = new BatchAVLProverSerializer[D, HF]
     forAll(Gen.choose(0, 10000)) { (treeSize: Int) =>
@@ -261,7 +272,7 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     val rootHeight = 5
     val root = deepInternalChain(depth)
     val manifest = BatchAVLProverManifest[D](root, rootHeight)
-    serializer.combine((manifest, Array.empty), KL, None).isFailure shouldBe true
+    serializer.combine((manifest, Array.empty[BatchAVLProverSubtree[D]]), KL, None).isFailure shouldBe true
   }
 
   property("combine rejects manifest with wrong height") {
@@ -269,14 +280,14 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     val rootHeight = 5
     val root = deepInternalChain(actualDepth)
     val manifest = BatchAVLProverManifest[D](root, rootHeight)
-    serializer.combine((manifest, Array.empty), KL, None).isFailure shouldBe true
+    serializer.combine((manifest, Array.empty[BatchAVLProverSubtree[D]]), KL, None).isFailure shouldBe true
   }
 
   property("combine accepts manifest with matching height") {
     val depth = 3
     val root = deepInternalChain(depth)
     val manifest = BatchAVLProverManifest[D](root, depth)
-    serializer.combine((manifest, Array.empty), KL, None).isSuccess shouldBe true
+    serializer.combine((manifest, Array.empty[BatchAVLProverSubtree[D]]), KL, None).isSuccess shouldBe true
   }
 
   property("nodesFromBytes rejects truncated leaf") {

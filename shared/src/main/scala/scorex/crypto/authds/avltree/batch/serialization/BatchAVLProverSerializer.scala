@@ -1,11 +1,13 @@
 package scorex.crypto.authds.avltree.batch.serialization
 
-import scorex.crypto.authds.avltree.batch.{BatchAVLProver, ProverLeaf, InternalProverNode, ProverNodes}
-import scorex.crypto.authds.{ADValue, ADKey, Balance}
+import scorex.crypto.authds.avltree.batch.{BatchAVLProver, InternalProverNode, ProverLeaf, ProverNodes}
+import scorex.crypto.authds.{ADKey, ADValue, Balance}
 import scorex.crypto.hash.{CryptographicHash, Digest}
 import scorex.util.encode.Base16
 import scorex.utils.{ByteArray, Bytes, Ints, Logger}
 
+import scala.annotation.tailrec
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
 /**
@@ -18,7 +20,7 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
 
   private val labelLength = hf.DigestSize
 
-  type SlicedTree = (BatchAVLProverManifest[D], Array[BatchAVLProverSubtree[D]])
+  type SlicedTree = (BatchAVLProverManifest[D], scala.collection.Seq[BatchAVLProverSubtree[D]])
 
   /**
     * Slices an AVL tree into a top manifest and bottom subtrees at the given `subtreeDepth`.
@@ -28,31 +30,34 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
 
       val height = tree.rootNodeHeight
       val rootProxyNode = ProxyInternalNode(tn)
+      val subtrees = ArrayBuffer.empty[BatchAVLProverSubtree[D]]
 
+      @tailrec
       def getSubtrees(currentNode: ProverNodes[D],
                       currentHeight: Int,
-                      parent: ProxyInternalNode[D]): Seq[BatchAVLProverSubtree[D]] = {
+                      parent: ProxyInternalNode[D]): Unit = {
         currentNode match {
           case n: InternalProverNode[D] if currentHeight > subtreeDepth =>
             val nextParent = ProxyInternalNode(n)
             parent.setChild(nextParent)
-            val leftSubtrees = getSubtrees(n.left, currentHeight - 1, nextParent)
-            val rightSubtrees = getSubtrees(n.right, currentHeight - 1, nextParent)
-            leftSubtrees ++ rightSubtrees
+            getSubtrees(n.left, currentHeight - 1, nextParent)
+            getSubtrees(n.right, currentHeight - 1, nextParent)
           case n: InternalProverNode[D] =>
             parent.setChild(ProxyInternalNode(n))
-            Seq(BatchAVLProverSubtree(n.left), BatchAVLProverSubtree(n.right))
+            subtrees += BatchAVLProverSubtree(n.left)
+            subtrees += BatchAVLProverSubtree(n.right)
           case l: ProverLeaf[D] =>
             parent.setChild(l)
-            Seq(BatchAVLProverSubtree(l))
+            subtrees += BatchAVLProverSubtree(l)
         }
       }
 
-      val subtrees = (getSubtrees(tn.left, height - 1, rootProxyNode) ++ getSubtrees(tn.right, height - 1, rootProxyNode)).toArray
+      getSubtrees(tn.left, height - 1, rootProxyNode)
+      getSubtrees(tn.right, height - 1, rootProxyNode)
       val manifest = BatchAVLProverManifest[D](rootProxyNode, height)
       (manifest, subtrees)
     case l: ProverLeaf[D] =>
-      (BatchAVLProverManifest[D](l, tree.rootNodeHeight), Array.empty[BatchAVLProverSubtree[D]])
+      (BatchAVLProverManifest[D](l, tree.rootNodeHeight), Seq.empty[BatchAVLProverSubtree[D]])
   }
 
   /**
@@ -62,7 +67,12 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
               keyLength: Int,
               valueLengthOpt: Option[Int]): Try[BatchAVLProver[D, HF]] = Try {
     val manifest = sliced._1
-    val subtrees = sliced._2
+    // Subtree lookups need O(1) indexed access. Array-backed inputs (including the ArrayBuffer
+    // produced by `slice`) are used as-is, without copying; linear sequences are copied once.
+    val subtrees: scala.collection.IndexedSeq[BatchAVLProverSubtree[D]] = sliced._2 match {
+      case iseq: scala.collection.IndexedSeq[BatchAVLProverSubtree[D]] @unchecked => iseq
+      case other => ArrayBuffer.empty[BatchAVLProverSubtree[D]] ++= other
+    }
 
     // Sort subtree indices by digest once. This gives O(log n) lookups without storing the
     // subtrees twice in a digest-keyed map.
