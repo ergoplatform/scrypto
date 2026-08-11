@@ -5,8 +5,6 @@ import scorex.crypto.authds.{ADKey, ADValue, Balance}
 import scorex.crypto.hash.{CryptographicHash, Digest}
 import scorex.util.encode.Base16
 import scorex.utils.{ByteArray, Bytes, Ints, Logger}
-
-import scala.annotation.tailrec
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
 
@@ -46,8 +44,9 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
             subtrees += BatchAVLProverSubtree(n.left)
             subtrees += BatchAVLProverSubtree(n.right)
           case l: ProverLeaf[D] =>
+            // The leaf is embedded directly in the manifest via its parent proxy, so it must
+            // not be added to subtrees: nothing would reference it there during combine.
             parent.setChild(l)
-            subtrees += BatchAVLProverSubtree(l)
         }
       }
 
