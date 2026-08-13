@@ -167,6 +167,13 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
     require(actualHeight == manifest.rootHeight,
       s"manifest height ${manifest.rootHeight} does not match actual tree height $actualHeight")
 
+    // Node labels commit to the balance and the children labels, not to the keys of internal nodes, so a
+    // manifest and its subtrees can carry keys their digests do not authenticate. Now that they are joined
+    // the tree is materialized, and every internal key can be checked against the one its leaves imply.
+    // Recovering a tree with a forged internal key fails here rather than producing a prover which then
+    // routes lookups down the wrong branch.
+    NodeKeyChecks.checkKeys(manifest.root).get
+
     new BatchAVLProver[D, HF](keyLength, valueLengthOpt, Some(manifest.root -> manifest.rootHeight)) {
       override val logger = serializer.logger
     }
