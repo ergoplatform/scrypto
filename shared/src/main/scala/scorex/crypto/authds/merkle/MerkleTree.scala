@@ -10,13 +10,34 @@ import scala.collection.mutable
 case class MerkleTree[D <: Digest](topNode: Node[D],
                                    elementsHashIndex: Map[mutable.WrappedArray.ofByte, Int]) {
 
+  private lazy val leafHashes: Seq[D] = {
+    @tailrec
+    def loop(nodes: List[Node[D]], hashes: List[D]): List[D] = nodes match {
+      case Nil => hashes.reverse
+      case (node: InternalNode[D]) :: rest =>
+        loop(node.left :: node.right :: rest, hashes)
+      case (node: Leaf[D]) :: rest =>
+        loop(rest, node.hash :: hashes)
+      case _ :: rest =>
+        loop(rest, hashes)
+    }
+
+    loop(topNode :: Nil, Nil)
+  }
+
   lazy val rootHash: D = topNode.hash
-  lazy val length: Int = elementsHashIndex.size
+  // Equal leaf hashes share an element lookup entry but remain separate tree positions.
+  lazy val length: Int = leafHashes.length
 
   def proofByElement(element: Leaf[D]): Option[MerkleProof[D]] = proofByElementHash(element.hash)
 
   def proofByElementHash(hash: D): Option[MerkleProof[D]] = {
-    elementsHashIndex.get(new mutable.WrappedArray.ofByte(hash)).flatMap(i => proofByIndex(i))
+    elementsHashIndex
+      .get(new mutable.WrappedArray.ofByte(hash))
+      .flatMap(proofByIndex)
+      .filter { proof =>
+        proof.hf.prefixedHash(MerkleTree.LeafPrefix, proof.leafData).sameElements(hash)
+      }
   }
 
   def proofByIndex(index: Int): Option[MerkleProof[D]] = if (index >= 0 && index < length) {
@@ -96,7 +117,7 @@ case class MerkleTree[D <: Digest](topNode: Node[D],
     }
 
     if (indices.nonEmpty && indices.forall(index => index >= 0 && index < length)) {
-      val hashes: Seq[Digest] = elementsHashIndex.toSeq.sortBy(_._2).map(_._1.toArray.asInstanceOf[Digest])
+      val hashes: Seq[Digest] = leafHashes
       val normalized_indices = indices.distinct.sorted
       val multiproof = loop(normalized_indices, hashes)
       Some(BatchMerkleProof(normalized_indices zip (normalized_indices map hashes.apply), multiproof))
