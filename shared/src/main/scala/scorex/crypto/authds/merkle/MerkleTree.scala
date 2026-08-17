@@ -7,16 +7,39 @@ import scorex.crypto.hash.{Digest, _}
 import scala.annotation.tailrec
 import scala.collection.mutable
 
-case class MerkleTree[D <: Digest](topNode: Node[D],
-                                   elementsHashIndex: Map[mutable.WrappedArray.ofByte, Int]) {
+/**
+  * Merkle tree constructed from leaves
+ */
+class MerkleTree[D <: Digest] private (leaves: Vector[Leaf[D]])(implicit val hf: CryptographicHash[D]) {
+
+  lazy val topNode: Node[D] = MerkleTree.calcTopNode(leaves)
 
   lazy val rootHash: D = topNode.hash
-  lazy val length: Int = elementsHashIndex.size
 
-  def proofByElement(element: Leaf[D]): Option[MerkleProof[D]] = proofByElementHash(element.hash)
+  lazy val length: Int = leaves.length
+
+  private lazy val leafHashes: Vector[D] = leaves.map(_.hash)
+
+  private lazy val hashToIndex: Map[mutable.WrappedArray.ofByte, Int] =
+    leaves.indices.foldLeft(Map.empty[mutable.WrappedArray.ofByte, Int]) { (acc, i) =>
+      val key = new mutable.WrappedArray.ofByte(leafHashes(i))
+      if (acc.contains(key)) acc else acc.updated(key, i)
+    }
+
+  def proofByElement(element: Leaf[D]): Option[MerkleProof[D]] = {
+    proofByElementHash(element.hash)
+  }
 
   def proofByElementHash(hash: D): Option[MerkleProof[D]] = {
-    elementsHashIndex.get(new mutable.WrappedArray.ofByte(hash)).flatMap(i => proofByIndex(i))
+    indexByElementHash(hash).flatMap(proofByIndex)
+  }
+
+  /**
+    * Position of the first leaf with the given hash, if any.
+    * Equal hashes are stored at several positions; only the first one is returned.
+    */
+  def indexByElementHash(hash: D): Option[Int] = {
+    hashToIndex.get(new mutable.WrappedArray.ofByte(hash))
   }
 
   def proofByIndex(index: Int): Option[MerkleProof[D]] = if (index >= 0 && index < length) {
@@ -45,7 +68,7 @@ case class MerkleTree[D <: Digest](topNode: Node[D],
     * @param indices - leaf indices
     * @return Optional BatchMerkleProof
     */
-  def proofByIndices(indices: Seq[Int])(implicit hf: CryptographicHash[D]): Option[BatchMerkleProof[D]] = {
+  def proofByIndices(indices: Seq[Int]): Option[BatchMerkleProof[D]] = {
 
     /**
       * Recursive function to build the multiproof
@@ -96,7 +119,7 @@ case class MerkleTree[D <: Digest](topNode: Node[D],
     }
 
     if (indices.nonEmpty && indices.forall(index => index >= 0 && index < length)) {
-      val hashes: Seq[Digest] = elementsHashIndex.toSeq.sortBy(_._2).map(_._1.toArray.asInstanceOf[Digest])
+      val hashes: Seq[Digest] = leafHashes
       val normalized_indices = indices.distinct.sorted
       val multiproof = loop(normalized_indices, hashes)
       Some(BatchMerkleProof(normalized_indices zip (normalized_indices map hashes.apply), multiproof))
@@ -144,13 +167,7 @@ object MerkleTree {
     */
   def apply[D <: Digest](payload: Seq[LeafData])
                         (implicit hf: CryptographicHash[D]): MerkleTree[D] = {
-    val leafs = payload.map(d => Leaf(d))
-    val elementsIndex: Map[mutable.WrappedArray.ofByte, Int] = leafs.indices.map { i =>
-      (new mutable.WrappedArray.ofByte(leafs(i).hash), i)
-    }.toMap
-    val topNode = calcTopNode[D](leafs)
-
-    MerkleTree(topNode, elementsIndex)
+    new MerkleTree(payload.map(d => Leaf(d)).toVector)(hf)
   }
 
   @tailrec

@@ -14,6 +14,14 @@ class MerkleTreeSpecification extends AnyPropSpec with ScalaCheckDrivenPropertyC
 
   private val LeafSize = 32
 
+  private def payloadsWithDuplicateLeaves: Seq[Seq[LeafData]] =
+    Seq(
+      Seq(1, 1),
+      Seq(1, 2, 1),
+      Seq(1, 2, 1, 3),
+      Seq(1, 2, 3, 4, 1)
+    ).map(_.map(value => LeafData @@ Array.fill[Byte](LeafSize)(value.toByte)))
+
   property("Proof generation by element") {
     forAll(smallInt) { (N: Int) =>
       whenever(N > 0) {
@@ -48,6 +56,63 @@ class MerkleTreeSpecification extends AnyPropSpec with ScalaCheckDrivenPropertyC
     }
   }
 
+  property("Proof by index remains bound to the requested position with duplicate leaves") {
+    val first = LeafData @@ Array.fill[Byte](LeafSize)(1: Byte)
+    val second = LeafData @@ Array.fill[Byte](LeafSize)(2: Byte)
+    val tree = MerkleTree(Seq(first, second, first))
+    val proof = tree.proofByIndex(0).get
+
+    proof.valid(tree.rootHash) shouldBe true
+    proof.leafData.sameElements(first) shouldBe true
+  }
+
+  property("Proof generation with duplicate leaves") {
+    payloadsWithDuplicateLeaves.foreach { data =>
+      val tree = MerkleTree(data)
+
+      withClue(s"leaf count ${data.length}: ") {
+        tree.length shouldBe data.length
+        data.indices.foreach { index =>
+          val proof = tree.proofByIndex(index).get
+          proof.leafData.sameElements(data(index)) shouldBe true
+          proof.valid(tree.rootHash) shouldBe true
+        }
+
+        Seq(data.head, data(1)).foreach { leafData =>
+          val leaf = Leaf(leafData)
+          Seq(tree.proofByElement(leaf), tree.proofByElementHash(leaf.hash)).foreach { proofOpt =>
+            val proof = proofOpt.get
+            proof.leafData.sameElements(leafData) shouldBe true
+            proof.valid(tree.rootHash) shouldBe true
+          }
+        }
+      }
+    }
+  }
+
+  property("Index by element hash returns the first occurrence with duplicate leaves") {
+    payloadsWithDuplicateLeaves.foreach { data =>
+      val tree = MerkleTree(data)
+      val hash = Leaf(data.head).hash
+
+      withClue(s"leaf count ${data.length}: ") {
+        tree.indexByElementHash(hash) shouldBe Some(0)
+        data.indices.foreach { index =>
+          tree.indexByElementHash(Leaf(data(index)).hash).isDefined shouldBe true
+        }
+      }
+    }
+  }
+
+  property("Index by element hash returns None for a missing hash") {
+    val d = (0 until 5).map(_ => LeafData @@ scorex.utils.Random.randomBytes(LeafSize))
+    val tree = MerkleTree(d)
+    val missing = Leaf(LeafData @@ scorex.utils.Random.randomBytes(LeafSize))
+
+    tree.indexByElementHash(missing.hash) shouldBe None
+    tree.proofByElementHash(missing.hash) shouldBe None
+  }
+
   property("Batch proof generation by indices") {
     val r = new Random()
     forAll(smallInt) { (N: Int) =>
@@ -67,6 +132,24 @@ class MerkleTreeSpecification extends AnyPropSpec with ScalaCheckDrivenPropertyC
     val d = (0 until 10).map(_ => LeafData @@ scorex.utils.Random.randomBytes(LeafSize))
     val tree = MerkleTree(d)
     tree.proofByIndices(Seq(2,2,2,3,6,6,8,9,9)).get.valid(tree.rootHash) shouldBe true
+  }
+
+  property("Batch proof generation with duplicate leaves") {
+    payloadsWithDuplicateLeaves.foreach { data =>
+      val tree = MerkleTree(data)
+      val duplicateIndex = data.lastIndexWhere(_.sameElements(data.head))
+      val requestedIndices = Seq(duplicateIndex, 0, duplicateIndex)
+      val expectedIndices = requestedIndices.distinct.sorted
+      val proof = tree.proofByIndices(requestedIndices).get
+
+      withClue(s"leaf count ${data.length}: ") {
+        proof.indices.map(_._1) shouldEqual expectedIndices
+        proof.indices.zip(expectedIndices).foreach { case ((_, hash), index) =>
+          hash.sameElements(Leaf(data(index)).hash) shouldBe true
+        }
+        proof.valid(tree.rootHash) shouldBe true
+      }
+    }
   }
 
   property("Batch proof generation by negative indices") {
