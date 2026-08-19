@@ -2,6 +2,7 @@
 **3.1.1**
 ---------
 
+* Merkle tree proof fix for trees with duplicate leaf values (#5)
 * AVL+ tree serialization hardening
 * BouncyCastle dependency update
 

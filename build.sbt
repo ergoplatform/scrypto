@@ -146,4 +146,4 @@ ThisBuild / dynverSeparator := "-"
 pgpPublicRing := file("ci/pubring.asc")
 pgpSecretRing := file("ci/secring.asc")
 pgpPassphrase := sys.env.get("PGP_PASSPHRASE").map(_.toArray)
-usePgpKeyHex("AA4F785C04B9DCCDD5332FB1329014D11A57FA1A")
+usePgpKeyHex("8D83DAB2D8CEB0E1DC02BCB21956263223E505D1")
