@@ -107,6 +107,14 @@ lazy val scryptoJS = scrypto.js
       Compile / npmDependencies ++= Seq(
         "@noble/hashes" -> "1.6.1"
       ),
+      Compile / npmDevDependencies ++= Seq(
+        "webpack" -> "5.109.2",
+        "webpack-cli" -> "5.1.4",
+        "webpack-dev-server" -> "5.2.6"
+      ),
+      webpack / version := "5.109.2",
+      webpackCliVersion := "5.1.4",
+      startWebpackDevServer / version := "5.2.6",
       useYarn := false
     )
 

@@ -18,8 +18,8 @@ scorex-errors.log
 *.log
 
 # local-only JS-related files and folders
-package-lock.json
 node_modules/
+/package-lock.json
 
 # Metals
 .metals/
