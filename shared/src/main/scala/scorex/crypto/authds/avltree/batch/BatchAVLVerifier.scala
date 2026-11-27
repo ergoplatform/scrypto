@@ -149,7 +149,7 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
     require(startingDigest.length == labelLength + 1)
     rootNodeHeight = startingDigest.last & 0xff
 
-    val maxNodes = if (maxNumOperations.isDefined) {
+    val maxNodes: Long = if (maxNumOperations.isDefined) {
       // compute the maximum number of nodes the proof can contain according to
       // https://eprint.iacr.org/2016/994 Appendix B last paragraph
 
@@ -157,6 +157,7 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
       var logNumOps = 0
       var temp = 1L
       val realNumOperations: Int = maxNumOperations.getOrElse(0)
+      require(realNumOperations >= 0, "maxNumOperations must be non-negative")
       while (temp < realNumOperations) {
         temp = temp * 2
         logNumOps += 1
@@ -164,12 +165,14 @@ class BatchAVLVerifier[D <: Digest, HF <: CryptographicHash[D]](startingDigest: 
 
       // compute maximum height that the tree can be before an operation
       temp = 1 + math.max(rootNodeHeight, logNumOps)
-      val hnew = (temp + temp / 2).toInt // this will replace 1.4405 from the paper with 1.5 and will round down, which is safe, because hnew is an integer
+      val hnew: Long = temp + temp / 2 // this will replace 1.4405 from the paper with 1.5 and will round down, which is safe, because hnew is an integer
       val realMaxDeletes: Int = maxDeletes.getOrElse(realNumOperations)
+      require(realMaxDeletes >= 0, "maxDeletes must be non-negative")
       // Note: this is quite likely a lot more than there will really be nodes
-      (realNumOperations + realMaxDeletes) * (2 * rootNodeHeight + 1) + realMaxDeletes * hnew + 1 // +1 needed in case numOperations == 0
+      val totalOps: Long = realNumOperations.toLong + realMaxDeletes.toLong
+      totalOps * (2L * rootNodeHeight + 1L) + realMaxDeletes.toLong * hnew + 1L // +1 needed in case numOperations == 0
     } else {
-      0
+      0L
     }
 
 

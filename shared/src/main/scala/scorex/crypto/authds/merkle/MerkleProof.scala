@@ -26,15 +26,25 @@ case class MerkleProof[D <: Digest](leafData: LeafData, levels: Seq[(Digest, Sid
                       (implicit val hf: CryptographicHash[D]) extends ScorexEncoding {
 
   def valid(expectedRootHash: Digest): Boolean = {
-    val leafHash = hf.prefixedHash(MerkleTree.LeafPrefix, leafData)
+    if (expectedRootHash.length != hf.DigestSize) {
+      false
+    } else if (levels.exists { case (hash, side) =>
+      (side != MerkleProof.LeftSide && side != MerkleProof.RightSide) ||
+        (hash.nonEmpty && hash.length != hf.DigestSize) ||
+        (hash.isEmpty && side != MerkleProof.LeftSide)
+    }) {
+      false
+    } else {
+      val leafHash = hf.prefixedHash(MerkleTree.LeafPrefix, leafData)
 
-    levels.foldLeft(leafHash) { case (prevHash, (hash, side)) =>
-      if (side == MerkleProof.LeftSide) {
-        hf.prefixedHash(MerkleTree.InternalNodePrefix, prevHash ++ hash)
-      } else {
-        hf.prefixedHash(MerkleTree.InternalNodePrefix, hash ++ prevHash)
-      }
-    }.sameElements(expectedRootHash)
+      levels.foldLeft(leafHash) { case (prevHash, (hash, side)) =>
+        if (side == MerkleProof.LeftSide) {
+          hf.prefixedHash(MerkleTree.InternalNodePrefix, prevHash ++ hash)
+        } else {
+          hf.prefixedHash(MerkleTree.InternalNodePrefix, hash ++ prevHash)
+        }
+      }.sameElements(expectedRootHash)
+    }
   }
 
   override def toString: String =

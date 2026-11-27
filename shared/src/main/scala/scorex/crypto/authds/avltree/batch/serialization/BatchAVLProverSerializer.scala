@@ -228,11 +228,11 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
           val value = ADValue @@ bytesIn.slice(start + 1 + 2 * keyLength, end)
           (new ProverLeaf[D](key, value, nextLeafKey), end)
         case 1 =>
-          require(start + 2 + keyLength <= end, "truncated internal node header")
+          require(start.toLong + 2L + keyLength.toLong <= end.toLong, "truncated internal node header")
           val balance = Balance @@ bytesIn(start + 1)
           require(balance >= -1 && balance <= 1, s"invalid balance value: $balance")
           val key = ADKey @@ bytesIn.slice(start + 2, start + 2 + keyLength)
-          require(start + keyLength + 6 <= end, "truncated internal node leftLength")
+          require(start.toLong + keyLength.toLong + 6L <= end.toLong, "truncated internal node leftLength")
           val leftLength = Ints.fromBytes(
             bytesIn(start + keyLength + 2),
             bytesIn(start + keyLength + 3),
@@ -255,8 +255,9 @@ class BatchAVLProverSerializer[D <: Digest, HF <: CryptographicHash[D]]
           require(leftComparison < 0 && rightComparison <= 0, s"key check fail for key ${Base16.encode(key)}")
           (new InternalProverNode[D](key, left, right, balance), end)
         case 2 =>
-          val nodeEnd = start + 2 + keyLength + 2 * labelLength
-          require(nodeEnd == end, "proxy node length mismatch")
+          val nodeEndLong = start.toLong + 2L + keyLength.toLong + 2L * labelLength.toLong
+          require(nodeEndLong == end.toLong, "proxy node length mismatch")
+          val nodeEnd = nodeEndLong.toInt
           val balance = Balance @@ bytesIn(start + 1)
           require(balance >= -1 && balance <= 1, s"invalid balance value: $balance")
           val key = ADKey @@ bytesIn.slice(start + 2, start + 2 + keyLength)

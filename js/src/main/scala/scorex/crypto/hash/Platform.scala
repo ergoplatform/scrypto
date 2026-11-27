@@ -22,9 +22,6 @@ object Platform {
     */
   type Digest = utilsMod.Hash[_]
 
-  private def bytesToShorts(xs: Array[Byte]): Array[Short] =
-    xs.map(x => (x & 0xFF).toShort)
-
   private def uint8ArrayToBytes(jsShorts: Uint8Array): Array[Byte] = {
     jsShorts.toArray[Short].map(x => x.toByte)
   }
@@ -67,7 +64,12 @@ object Platform {
                    bytes: Array[Byte],
                    inOff: Int,
                    inLen: Int): Unit = {
-    val in = Uint8Array.of(bytesToShorts(bytes.slice(inOff, inOff + inLen)): _*)
+    val in = new Uint8Array(inLen)
+    var i = 0
+    while (i < inLen) {
+      in(i) = (bytes(inOff + i) & 0xFF).toShort
+      i += 1
+    }
     digest.update(in)
   }
 

@@ -128,11 +128,7 @@ class MerkleTree[D <: Digest] private (leaves: Vector[Leaf[D]])(implicit val hf:
     }
   }
 
-  lazy val lengthWithEmptyLeafs: Int = {
-    def log2(x: Double): Double = math.log(x) / math.log(2)
-
-    Math.max(math.pow(2, math.ceil(log2(length))).toInt, 2)
-  }
+  lazy val lengthWithEmptyLeafs: Int = MerkleTree.paddedLength(length)
 
   //Debug only
   override lazy val toString: String = {
@@ -156,6 +152,16 @@ class MerkleTree[D <: Digest] private (leaves: Vector[Leaf[D]])(implicit val hf:
 object MerkleTree {
   val LeafPrefix: Byte = 0: Byte
   val InternalNodePrefix: Byte = 1: Byte
+
+  private[merkle] def paddedLength(length: Int): Int = {
+    if (length <= 2) {
+      2
+    } else {
+      val h = Integer.highestOneBit(length - 1)
+      require(h < (1 << 30), s"MerkleTree length $length exceeds maximum power-of-two capacity")
+      h << 1
+    }
+  }
 
   /**
     * Construct Merkle tree from leafs
