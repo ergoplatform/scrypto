@@ -488,6 +488,13 @@ class AVLBatchSerializationSpecification extends AnyPropSpec with ScalaCheckDriv
     }
   }
 
+  property("nodesFromBytes rejects oversized keyLength without 32-bit overflow") {
+    val tinyInternal = Array[Byte](1, 0, 1, 2, 3, 4)
+    val tinyProxy = Array[Byte](2, 0, 1, 2, 3, 4)
+    serializer.nodesFromBytes(tinyInternal, Int.MaxValue - 1).failed.get shouldBe an[IllegalArgumentException]
+    serializer.nodesFromBytes(tinyProxy, Int.MaxValue - 1).failed.get shouldBe an[IllegalArgumentException]
+  }
+
   def leftTree(n: ProverNodes[D]): Seq[ProverNodes[D]] = n match {
     case n: ProxyInternalNode[D] if n.isEmpty =>
       Seq(n)

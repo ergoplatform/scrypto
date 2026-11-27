@@ -166,12 +166,14 @@ class BatchAVLProver[D <: Digest, HF <: CryptographicHash[D]](val keyLength: Int
     * @return - Success(Some(old value)), Success(None), or Failure
     */
   def performOneOperation(operation: Operation): Try[Option[ADValue]] = Try {
+    found = false
     replayIndex = directionsBitLength
     returnResultOfOneOperation(operation, topNode) match {
       case Success(n) =>
         topNode = n._1.asInstanceOf[ProverNodes[D]]
         n._2
       case Failure(e) =>
+        found = false
         // take the bit length before fail and divide by 8 with rounding up
         val oldDirectionsByteLength = (replayIndex + 7) / 8
         // undo the changes to the directions array

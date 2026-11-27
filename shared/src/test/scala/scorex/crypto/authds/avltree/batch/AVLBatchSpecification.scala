@@ -808,6 +808,66 @@ class AVLBatchSpecification extends AnyPropSpec with ScalaCheckDrivenPropertyChe
     the [IllegalArgumentException] thrownBy prover.checkTree() should have message "requirement failed: tree depth exceeds maximum allowed depth"
   }
 
+  property("BatchAVLVerifier handles large maxNumOperations without 32-bit maxNodes overflow and rejects negative bounds") {
+    val prover = new BatchAVLProver[D, HF](KL, Some(VL))
+    val initialDigest = prover.digest
+    val k = ADKey @@ Array.fill[Byte](KL)(1.toByte)
+    val v = ADValue @@ Array.fill[Byte](VL)(2.toByte)
+    prover.performOneOperation(Insert(k, v)).get
+    val proof = prover.generateProof()
+
+    val validVerifier = new BatchAVLVerifier[D, HF](
+      initialDigest, proof, KL, Some(VL), maxNumOperations = Some(10), maxDeletes = Some(10)
+    )
+    validVerifier.digest.map(_.toSeq) shouldBe Some(initialDigest.toSeq)
+
+    // Build a synthetic digest with rootNodeHeight = 255 for the single-leaf empty tree
+    val emptyProver = new BatchAVLProver[D, HF](KL, Some(VL))
+    val emptyDigest255 = ADDigest @@ (emptyProver.digest.dropRight(1) :+ 255.toByte)
+    emptyProver.performOneOperation(Lookup(k)).get
+    val lookupProof = emptyProver.generateProof()
+
+    val largeOpsVerifier = new BatchAVLVerifier[D, HF](
+      emptyDigest255, lookupProof, KL, Some(VL), maxNumOperations = Some(2000000)
+    )
+    largeOpsVerifier.digest.map(_.toSeq) shouldBe Some(emptyDigest255.toSeq)
+
+    // Negative maxNumOperations or maxDeletes must be rejected even when the other bound is positive
+    val negOpsVerifier = new BatchAVLVerifier[D, HF](
+      initialDigest, proof, KL, Some(VL), maxNumOperations = Some(-1), maxDeletes = Some(10)
+    )
+    negOpsVerifier.digest shouldBe None
+
+    val negDeletesVerifier = new BatchAVLVerifier[D, HF](
+      initialDigest, proof, KL, Some(VL), maxNumOperations = Some(10), maxDeletes = Some(-1)
+    )
+    negDeletesVerifier.digest shouldBe None
+  }
+
+  property("BatchAVLProver resets found flag after mid-descent failure") {
+    val prover = new BatchAVLProver[D, HF](KL, Some(VL))
+    val keys = Seq(0x10, 0x20, 0x30, 0x40).map(b => ADKey @@ Array.fill[Byte](KL)(b.toByte))
+    val values = Seq(0x10, 0x20, 0x30, 0x40).map(b => ADValue @@ Array.fill[Byte](VL)(b.toByte))
+    keys.zip(values).foreach { case (k, v) => prover.performOneOperation(Insert(k, v)).get }
+    prover.generateProof()
+
+    val root = prover.topNode.asInstanceOf[InternalProverNode[D]]
+    val rootKey = root.key
+    val failingRight = new InternalProverNode[D](root.right.key, root.right, root.right, Balance @@ 0.toByte) {
+      override def left: ProverNodes[D] = throw new RuntimeException("simulated storage error")
+      override def right: ProverNodes[D] = throw new RuntimeException("simulated storage error")
+    }
+    prover.topNode = root.getNew(newRight = failingRight)
+
+    // Matching rootKey sets found = true before descending into failingRight and throwing.
+    prover.performOneOperation(Lookup(rootKey)).isFailure shouldBe true
+
+    // Subsequent lookup of an absent key in the left subtree must return None, not -inf's value.
+    val absentLeft = ADKey @@ Array.fill[Byte](KL)(0x05.toByte)
+    prover.performOneOperation(Lookup(absentLeft)).get shouldBe None
+    prover.performOneOperation(Lookup(keys.head)).get.map(_.toSeq) shouldBe Some(values.head.toSeq)
+  }
+
 
   lazy val kvGen: Gen[(ADKey, ADValue)] = for {
     key <- Gen.listOfN(KL, Arbitrary.arbitrary[Byte]).map(_.toArray) suchThat

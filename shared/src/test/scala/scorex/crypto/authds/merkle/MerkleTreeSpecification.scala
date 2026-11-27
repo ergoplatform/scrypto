@@ -225,4 +225,46 @@ class MerkleTreeSpecification extends AnyPropSpec with ScalaCheckDrivenPropertyC
       }
     }
   }
+
+  property("MerkleProof.valid rejects invalid side bytes, empty right-side siblings, and wrong digest lengths") {
+    val leaves = (0 until 3).map(i => LeafData @@ Array.fill[Byte](LeafSize)(i.toByte))
+    val tree = MerkleTree(leaves)
+    val validProof = tree.proofByIndex(2).get
+    validProof.valid(tree.rootHash) shouldBe true
+
+    // Invalid side byte (neither LeftSide=0 nor RightSide=1)
+    val badSideLevels = validProof.levels.map { case (h, _) => (h, scorex.crypto.authds.Side @@ 2.toByte) }
+    MerkleProof(validProof.leafData, badSideLevels).valid(tree.rootHash) shouldBe false
+
+    // Empty sibling paired with RightSide (EmptyNode is only valid as right sibling -> LeftSide computed element)
+    val flippedEmpty = validProof.levels.map { case (h, s) =>
+      if (h.isEmpty) (h, MerkleProof.RightSide) else (h, s)
+    }
+    flippedEmpty.exists { case (h, s) => h.isEmpty && s == MerkleProof.RightSide } shouldBe true
+    MerkleProof(validProof.leafData, flippedEmpty).valid(tree.rootHash) shouldBe false
+
+    // Non-empty sibling with wrong digest length (even when root matches the truncated hash)
+    val shortHash = Digest32 @@ Array.fill[Byte](16)(1.toByte)
+    val shortRoot = hf.prefixedHash(
+      MerkleTree.InternalNodePrefix,
+      hf.prefixedHash(MerkleTree.LeafPrefix, leaves.head) ++ shortHash
+    )
+    MerkleProof(leaves.head, Seq((shortHash, MerkleProof.LeftSide))).valid(shortRoot) shouldBe false
+
+    // Wrong expectedRootHash length
+    validProof.valid(Digest32 @@ tree.rootHash.take(16)) shouldBe false
+  }
+
+  property("MerkleTree.paddedLength handles exact powers of two including 2^29 and rejects overflow") {
+    MerkleTree.paddedLength(0) shouldBe 2
+    MerkleTree.paddedLength(1) shouldBe 2
+    MerkleTree.paddedLength(2) shouldBe 2
+    MerkleTree.paddedLength(3) shouldBe 4
+    MerkleTree.paddedLength(4) shouldBe 4
+    MerkleTree.paddedLength(5) shouldBe 8
+    MerkleTree.paddedLength(1 << 29) shouldBe (1 << 29)
+    MerkleTree.paddedLength((1 << 29) + 1) shouldBe (1 << 30)
+    MerkleTree.paddedLength(1 << 30) shouldBe (1 << 30)
+    an[IllegalArgumentException] should be thrownBy MerkleTree.paddedLength((1 << 30) + 1)
+  }
 }
